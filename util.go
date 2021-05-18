@@ -3,7 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
-	"os"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -25,10 +25,13 @@ func pairsToMap(pairs [][]string) map[string]string {
 	return m
 }
 
-func marshal(data interface{}) (string, error) {
+func marshal(data interface{}, indent bool) (string, error) {
 	var b bytes.Buffer
 	enc := json.NewEncoder(&b)
 	enc.SetEscapeHTML(false)
+	if indent {
+		enc.SetIndent("","  ")
+	}
 	if e := enc.Encode(data); e != nil {
 		return "", e
 	}
@@ -43,7 +46,7 @@ func unmarshal(text string, obj interface{}) error {
 func quit(msg string) {
 	//fmt.Fprintln(os.Stderr, "ght:", msg)
 	panic(msg)
-	os.Exit(1)
+	//os.Exit(1)
 }
 
 func checke(e error) {
@@ -110,3 +113,20 @@ func valueToInterface(value string) interface{} {
 	}
 }
 
+var varExpansion = regexp.MustCompile(`{[a-z][\w_-]*}`)
+
+func containsVarExpansions(s string) bool {
+	return varExpansion.MatchString(s)
+}
+
+func expandVariables(value string, vars SMap) string {
+	return varExpansion.ReplaceAllStringFunc(value,func(s string) string {
+		s = s[1:len(s)-1] // trim the {}
+		if r,ok := vars[s]; ok {
+			return r
+		} else {
+			quit(s + " is not a defined")
+			return ""
+		}
+	})
+}

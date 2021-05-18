@@ -49,10 +49,10 @@ func readConfig(name, method string) (*RequestData, bool) {
 	if !ok {
 		quit("no such saved config " + key)
 	}
-	if !partial {
-		base := in.Data[name]
-		res.merge(base, true)
-	}
+	//if !partial {
+	//	base := in.Data[name]
+	//	res.merge(base, true)
+	//}
 	return res, partial
 }
 
@@ -75,7 +75,7 @@ func writeConfig(name, group string, data *RequestData) {
 	} else {
 		out.Data[name] = data
 	}
-	res, e := marshal(out)
+	res, e := marshal(out,false)
 	checke(e)
 	e = cache.WriteFile(configFile, []byte(res))
 	checke(e)

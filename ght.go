@@ -10,6 +10,8 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -19,31 +21,21 @@ type Strings = []string
 type SMap = map[string]string
 
 type RequestData struct {
-	Method  string
-	Payload string
-	Base    string
-	Url     string
-	Vars    SMap
-	Headers [][]string
-	User string
-	Password string
+	Method   string     `json:"method,omitempty"`
+	Payload  string     `json:"payload,omitempty"`
+	Base     string     `json:"base,omitempty"`
+	Url      string     `json:"url,omitempty"`
+	Vars     SMap       `json:"vars,omitempty"`
+	Headers  [][]string `json:"headers,omitempty"`
+	User     string     `json:"user,omitempty"`
+	Password string     `json:"password,omitempty"`
 }
 
 func (rd *RequestData) merge(other *RequestData, partial bool) {
 	rd.Base = other.Base
 	rd.User = other.User
 	rd.Password = other.Password
-	//if rd.Headers != nil {
-	//	for _,p := range other.Headers {
-	//
-	//	}
-	//} else {
-	//	rd.Headers = other.Headers
-	//}
 	rd.Headers = other.Headers
-	if partial {
-		return
-	}
 	rd.Payload = other.Payload
 	rd.Vars = other.Vars
 	rd.Method = other.Method
@@ -51,17 +43,17 @@ func (rd *RequestData) merge(other *RequestData, partial bool) {
 }
 
 var fullTest = Strings{
-	"dump",
+	"test",
 	"d:", "a=1", "b=hello", "c=1,ok", "d.x=42", "d.y.alpha=answer",
 	"v:", "ex=1", "why=a+b", "new=something",
 	"h:", "Content-Type=application/json",
 	"/anything",
 	"u:", "https://httpbin.org",
-	"s:", "t",
+	//"s:", "t",
 }
 
 var runTest = Strings{
-	"e.dump","d:","test.json",
+	"e.dump", "d:", "test.json",
 }
 
 var standardMethods = map[string]bool{
@@ -77,15 +69,64 @@ func isStandardMethod(m string) bool {
 
 func main() {
 	osArgs := os.Args[1:]
-	args := runTest
+	args := fullTest
 	if len(osArgs) > 0 {
 		args = osArgs
 	}
+	if len(args) == 1 && filepath.Ext(args[0]) == ".ght" {
+		contents, e := ioutil.ReadFile(args[0])
+		checke(e)
+		wspace := regexp.MustCompile(`\s+`)
+		actualArgs := Strings{}
+		for _, line := range strings.Split(string(contents), "\n") {
+			if strings.HasPrefix(line, "#") {
+				fmt.Println(line)
+				if len(actualArgs) > 0 {
+					runAndPrint(actualArgs)
+					actualArgs = Strings{}
+				}
+			} else {
+				actualArgs = append(actualArgs, wspace.Split(line, -1)...)
+			}
+		}
+		if len(actualArgs) > 0 {
+			runAndPrint(actualArgs)
+		}
+	} else {
+		runAndPrint(args)
+	}
+}
+
+func runAndPrint(args Strings) {
+	resp := run(args)
+	failed := !(resp.statusCode >= 200 && resp.statusCode < 300)
+	if failed && resp.statusCode != 0 {
+		fmt.Fprintln(os.Stderr, "status", resp.statusCode)
+	}
+	if resp.js != nil {
+		hj, e := marshal(resp.js, true)
+		checke(e)
+		fmt.Println(hj)
+	} else if len(resp.body) > 0 {
+		fmt.Println(string(resp.body))
+	}
+}
+
+type RunResponse struct {
+	js            Map    // body as a Map, if possible
+	body          []byte // body as text otherwise
+	contentType   string
+	contentLength int
+	statusCode    int
+}
+
+func run(args []string) RunResponse {
 	var flag string
 	var pairs [][]string
 	var saveName string
 	var data RequestData
 	var mimeType string
+	var dataPairs [][]string
 	ns, method, ok := splitDot2(args[0])
 	if !ok {
 		method = args[0]
@@ -103,7 +144,7 @@ func main() {
 	}
 	fetch := data.Method != "TEST"
 	// after the method, vars may start immediately
-	skipV := strings.Contains(args[0],"=") && ! strings.HasPrefix(args[0],"http")
+	skipV := len(args) > 0 && strings.Contains(args[0], "=") && !strings.HasPrefix(args[0], "http")
 	for len(args) > 0 {
 		if skipV {
 			flag = "v:"
@@ -112,32 +153,31 @@ func main() {
 		}
 		skipV = false
 		switch flag {
-		case "d:","data:":
-			var m Map
-			var e error
-			pairs, args = grabWhilePairs(args)
-			if len(pairs) == 0 {
-				data.Payload, mimeType, args = loadFileIfPossible(args,true)
-			} else {
-				m = parsePairs(pairs)
-				data.Payload, e = marshal(m)
-				mimeType = "application/json"
-				checke(e)
-			}
-			if !fetch {
-				fmt.Print("Payload", data.Payload)
+		case "d:", "data:":
+			dataPairs, args = grabWhilePairs(args)
+			if len(dataPairs) == 0 {
+				dataPairs = [][]string{{"@", args[0]}}
+				args = args[1:]
 			}
 		case "v:", "vars:":
 			pairs, args = grabWhilePairs(args)
 			if len(pairs) == 0 {
 				var contents string
-				contents,_, args = loadFileIfPossible(args,false)
+				contents, _ = loadFileIfPossible(args[0], false)
+				args = args[1:]
 				mappa := make(SMap)
 				e := unmarshal(contents, &mappa)
 				checke(e)
 				data.Vars = mappa
 			} else {
-				data.Vars = pairsToMap(pairs)
+				// this _overrides_ inherited map entries
+				if data.Vars == nil {
+					data.Vars = SMap{}
+				}
+				newVars := pairsToMap(pairs)
+				for k := range newVars {
+					data.Vars[k] = newVars[k]
+				}
 			}
 		case "h:", "head:":
 			pairs, args = grabWhilePairs(args)
@@ -155,26 +195,60 @@ func main() {
 		case "s:", "save:":
 			saveName, args = args[0], args[1:]
 		default:
+			if flag == "" {
+				break
+			}
+			fmt.Println("got",flag,args)
 			data.Url = flag
 		}
 	}
-	if saveName != "" {
-		writeConfig(saveName, ns, &data)
-		return
-	}
 
 	if !fetch {
-		fmt.Println("Vars", data.Vars)
-		fmt.Println("Headers", data.Headers)
+		if len(data.Vars) > 0 {
+			fmt.Println("Vars", data.Vars)
+		}
+		if len(data.Headers) > 0 {
+			fmt.Println("Headers", data.Headers)
+		}
 		if data.User != "" {
 			fmt.Println("user", data.User, "password", data.Password)
 		}
+	}
+
+	// we save at this point because expansion is now going further to take place
+	if saveName != "" {
+		fmt.Println("Data", data)
+		writeConfig(saveName, ns, &data)
+		return RunResponse{}
+	}
+
+	if len(dataPairs) == 1 && dataPairs[0][0] == "@" {
+		file := dataPairs[0][1]
+		if containsVarExpansions(file) {
+			file = expandVariables(file, data.Vars)
+		}
+		data.Payload, mimeType = loadFileIfPossible(file, true)
+	} else {
+		m := parsePairs(dataPairs)
+		if len(m) > 0 {
+			payload, e := marshal(m, false)
+			checke(e)
+			mimeType = "application/json"
+			if containsVarExpansions(payload) {
+				payload = expandVariables(payload, data.Vars)
+			}
+			data.Payload = payload
+		}
+	}
+	if !fetch && len(data.Payload) > 0 && mimeType == "application/json" {
+		fmt.Print("Payload", data.Payload)
 	}
 
 	fullUrl := data.Url
 	if data.Base != "" {
 		fullUrl = data.Base + fullUrl
 	}
+	// is this a URI template?
 	if strings.Contains(fullUrl, "{") {
 		var e error
 		fullUrl, e = uritemplates.Expand(fullUrl, data.Vars)
@@ -188,7 +262,7 @@ func main() {
 	}
 	if !fetch {
 		fmt.Println("Url", fullUrl)
-		return
+		return RunResponse{}
 	}
 	client := &http.Client{}
 	//start := time.Now()
@@ -210,61 +284,53 @@ func main() {
 
 	body, err := io.ReadAll(resp.Body)
 	resp.Body.Close()
-	failed := !(resp.StatusCode >= 200 && resp.StatusCode < 300)
-	if failed {
-		fmt.Fprintln(os.Stderr, "status", resp.Status)
-	}
 	// a special case with HEAD method - display headers in JSON format
+	var js Map
+	contentType := resp.Header.Get("Content-Type")
 	if data.Method == "HEAD" {
-		m := make(SMap)
-		for key := range resp.Header {
-			m[key] = resp.Header.Get(key)
-		}
-		hj, e := marshal(m)
-		checke(e)
-		fmt.Println(hj)
-	}
-	// strong opinion: should just be able to get files
-	path := filepath.Base(fullUrl)
-	ext := filepath.Ext(path)
-	if data.Method == "GET" && ext != "" && ! strings.ContainsAny(ext,"?=#") {
-		err = ioutil.WriteFile(path, body, 0644)
-		checke(err)
+		js = headersToMap(resp.Header)
 	} else {
-		fmt.Println(string(body))
+		// strong opinion: should just be able to get files
+		path := filepath.Base(fullUrl)
+		ext := filepath.Ext(path)
+		if data.Method == "GET" && ext != "" && !strings.ContainsAny(ext, "?=#") {
+			err = ioutil.WriteFile(path, body, 0644)
+			checke(err)
+			body = nil
+		} else if contentType == "application/json" {
+			unmarshal(string(body), &js)
+			body = nil
+		}
 	}
-	if failed {
-		os.Exit(1)
+	contentLength, _ := strconv.Atoi(resp.Header.Get("Content-Length"))
+	return RunResponse{
+		js:            js,
+		body:          body,
+		contentType:   contentType,
+		contentLength: contentLength,
+		statusCode:    resp.StatusCode,
 	}
-
-	// a LOT faster the second time 260ms vs 1560ms
-	//start = time.Now()
-	//client.Get(Url)
-	//fmt.Println("took", time.Since(start))
-
 }
 
-func loadFileIfPossible(args Strings, allTypes bool) (string,string,Strings) {
-	maybeFile := args[0]
+// a LOT faster the second time 260ms vs 1560ms
+//start = time.Now()
+//client.Get(Url)
+//fmt.Println("took", time.Since(start))
+
+func loadFileIfPossible(maybeFile string, allTypes bool) (string, string) {
 	ext := filepath.Ext(maybeFile)
-	if ext != ".json" && ! allTypes {
-		// for now: could just read and see if we can marshel...
+	if ext != ".json" && !allTypes {
+		// for now: could just read and see if we can marshal..
 		quit("vars can only be set with JSON currently")
 	}
 	mtype := mime.TypeByExtension(ext)
-	fmt.Println("type", mtype)
 	if mtype == "" {
 		// don'mtype know if we can further make a guess about charset...
 		mtype = "text/plain"
 	}
-	if ext == ".json" {
-		bb, e := ioutil.ReadFile(maybeFile)
-		checke(e)
-		return string(bb), mtype,args[1:]
-	} else {
-		quit("file extension not supported " + ext)
-	}
-	return "","",args
+	bb, e := ioutil.ReadFile(maybeFile)
+	checke(e)
+	return string(bb), mtype
 }
 
 func parseQueryPairs(m SMap) url.Values {
@@ -283,3 +349,10 @@ func parseHeaders(pairs [][]string) http.Header {
 	return q
 }
 
+func headersToMap(h http.Header) Map {
+	m := make(Map)
+	for key := range h {
+		m[key] = h.Get(key)
+	}
+	return m
+}
