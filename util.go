@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -113,20 +114,59 @@ func valueToInterface(value string) interface{} {
 	}
 }
 
-var varExpansion = regexp.MustCompile(`{[a-z][\w_-]*}`)
-
 func containsVarExpansions(s string) bool {
 	return varExpansion.MatchString(s)
+}
+var (
+	//regularVar = regexp.MustCompile(`[a-z][\w_-]*`)
+	varExpansion = regexp.MustCompile(`{[/?]*[a-zA-Z][\w_\-,]*}`)
+)
+
+type Pair struct {
+	name string
+	value string
 }
 
 func expandVariables(value string, vars SMap) string {
 	return varExpansion.ReplaceAllStringFunc(value,func(s string) string {
 		s = s[1:len(s)-1] // trim the {}
-		if r,ok := vars[s]; ok {
-			return r
+		//fmt.Println(s)
+		if s[0] == '/' || s[0] == '?' {
+			op := s[0]
+			s = s[1:]
+			pairs := []Pair{}
+			for _,p := range strings.Split(s,",") {
+				r := lookup(p, vars)
+				if r != "" {
+					pairs = append(pairs,Pair{p,r})
+				}
+			}
+			subst := strings.Builder{}
+			if op == '/' {
+				for _,p := range pairs {
+					value := url.PathEscape(p.value)
+					subst.WriteString("/" + value)
+				}
+			} else {
+				sep := "?"
+				for _,p := range pairs {
+					value := url.QueryEscape(p.value)
+					subst.WriteString(sep + p.name + "=" + value)
+					sep = "&"
+				}
+			}
+			return subst.String()
 		} else {
-			quit(s + " is not a defined")
-			return ""
+			return lookup(s, vars)
 		}
 	})
+}
+
+func lookup(s string, vars SMap) string {
+	if r, ok := vars[s]; ok {
+		return r
+	} else {
+		//log.Printf("%q is not a defined", s)
+		return ""
+	}
 }

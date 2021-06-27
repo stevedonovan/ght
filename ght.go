@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"github.com/olivere/elastic/uritemplates"
 	"io"
 	"io/ioutil"
 	"mime"
@@ -50,10 +49,6 @@ var fullTest = Strings{
 	"/anything",
 	"u:", "https://httpbin.org",
 	//"s:", "t",
-}
-
-var runTest = Strings{
-	"e.dump", "d:", "test.json",
 }
 
 var standardMethods = map[string]bool{
@@ -251,7 +246,7 @@ func run(args []string) RunResponse {
 	// is this a URI template?
 	if strings.Contains(fullUrl, "{") {
 		var e error
-		fullUrl, e = uritemplates.Expand(fullUrl, data.Vars)
+		fullUrl = expandVariables(fullUrl, data.Vars)
 		checke(e)
 	} else {
 		q := parseQueryPairs(data.Vars)
