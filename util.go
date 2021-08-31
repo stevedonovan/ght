@@ -1,9 +1,12 @@
 package main
 
 import (
-	"bytes"
-	"encoding/json"
+	"fmt"
+	"github.com/stevedonovan/ght/pointer"
+	"github.com/stevedonovan/ght/term"
+	"log"
 	"net/url"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -26,28 +29,13 @@ func pairsToMap(pairs [][]string) map[string]string {
 	return m
 }
 
-func marshal(data interface{}, indent bool) (string, error) {
-	var b bytes.Buffer
-	enc := json.NewEncoder(&b)
-	enc.SetEscapeHTML(false)
-	if indent {
-		enc.SetIndent("","  ")
-	}
-	if e := enc.Encode(data); e != nil {
-		return "", e
-	}
-	return b.String(), nil
-}
-
-func unmarshal(text string, obj interface{}) error {
-	dec := json.NewDecoder(strings.NewReader(text))
-	return dec.Decode(obj)
-}
-
 func quit(msg string) {
-	//fmt.Fprintln(os.Stderr, "ght:", msg)
-	panic(msg)
-	//os.Exit(1)
+	if os.Getenv("GHT_PANIC") != "" {
+		panic(msg)
+	} else {
+		term.BrightRed(os.Stderr, "ght: %s\n", msg)
+		os.Exit(1)
+	}
 }
 
 func checke(e error) {
@@ -56,7 +44,27 @@ func checke(e error) {
 	}
 }
 
-func grabWhilePairs(args []string) ([][]string, []string) {
+func keys(m map[string]string) []string {
+	res := make([]string,len(m))
+	i := 0
+	for k := range m {
+		res[i] = k
+		i++
+	}
+	return res
+}
+
+type Pairs [][]string
+
+func NewFilePair(file string) Pairs {
+	return Pairs{{"@",file}}
+}
+
+func (p Pairs) KeyValue(idx int) (string,string) {
+	return p[idx][0], p[idx][1]
+}
+
+func grabWhilePairs(args []string) (Pairs, []string) {
 	out := [][]string{}
 	i := 0
 	for ; i < len(args); i++ {
@@ -71,7 +79,7 @@ func grabWhilePairs(args []string) ([][]string, []string) {
 	return out, args[i:]
 }
 
-// useful stuff for turning pairs like a=1 name=hello into JSON
+// useful stuff for turning Pairs like a=1 name=hello into JSON
 func parsePairs(args [][]string) Map {
 	m := make(Map)
 	for _, a := range args {
@@ -107,6 +115,9 @@ func valueToInterface(value string) interface{} {
 		}
 		return arr
 	}
+	if value == "true" || value == "false" {
+		return value == "true"
+	}
 	if v, err := strconv.ParseFloat(value, 64); err == nil {
 		return v
 	} else {
@@ -114,12 +125,31 @@ func valueToInterface(value string) interface{} {
 	}
 }
 
+func readKeyValueFile(contents string) (Map,error) {
+	res := make(Map)
+	pairs := [][]string{}
+	// Windows?
+	for _,line := range strings.Split(contents,"\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line,"#") {
+			continue
+		}
+		idx := strings.Index(line,"=")
+		if idx == -1 {
+			return res,fmt.Errorf("cannot split %q in key/value Pairs with =", line)
+		}
+		pairs = append(pairs,[]string{line[:idx],line[idx+1:]})
+	}
+	res = parsePairs(pairs)
+	return res,nil
+}
+
 func containsVarExpansions(s string) bool {
 	return varExpansion.MatchString(s)
 }
 var (
 	//regularVar = regexp.MustCompile(`[a-z][\w_-]*`)
-	varExpansion = regexp.MustCompile(`{[/?]*[a-zA-Z][\w_\-,]*}`)
+	varExpansion = regexp.MustCompile(`{[/?]*[a-zA-Z][\w_\-,.]*}`)
 )
 
 type Pair struct {
@@ -127,16 +157,15 @@ type Pair struct {
 	value string
 }
 
-func expandVariables(value string, vars SMap) string {
+func expandVariables(value string, vars Map) string {
 	return varExpansion.ReplaceAllStringFunc(value,func(s string) string {
 		s = s[1:len(s)-1] // trim the {}
-		//fmt.Println(s)
 		if s[0] == '/' || s[0] == '?' {
 			op := s[0]
 			s = s[1:]
 			pairs := []Pair{}
 			for _,p := range strings.Split(s,",") {
-				r := lookup(p, vars)
+				r := lookup(p, vars, false)
 				if r != "" {
 					pairs = append(pairs,Pair{p,r})
 				}
@@ -157,16 +186,27 @@ func expandVariables(value string, vars SMap) string {
 			}
 			return subst.String()
 		} else {
-			return lookup(s, vars)
+			return lookup(s, vars, true)
 		}
 	})
 }
 
-func lookup(s string, vars SMap) string {
-	if r, ok := vars[s]; ok {
-		return r
+func lookup(s string, vars Map, full bool) string {
+	if full {
+		r,e := pointer.Filter(vars,s,nil)
+		if e != nil {
+			if v := os.Getenv(s); v != "" {
+				return v
+			} else {
+				log.Printf("warning: with %q error %v", s, e)
+				return ""
+			}
+		}
+		return fmt.Sprintf("%v",r)
+	} else if r, ok := vars[s]; ok {
+		return fmt.Sprintf("%v",r)
 	} else {
-		//log.Printf("%q is not a defined", s)
+		log.Printf("%q is not defined", s)
 		return ""
 	}
 }
