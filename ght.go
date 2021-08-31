@@ -2,7 +2,7 @@ package main
 
 import (
 	"context"
-	"flag"
+	//"flag"
 	"fmt"
 	"github.com/stevedonovan/ght/term"
 	"io"
@@ -229,7 +229,7 @@ func run(args []string) RunResponse {
 		fmt.Println("Url", fullUrl)
 		return RunResponse{}
 	}
-	var unixHttp = regexp.MustCompile(`https?://\[([^]]+)\]`)
+	var unixHttp = regexp.MustCompile(`https?://\[([^]]+)\](.+)`)
 	var transport *http.Transport = nil
 	if matches := unixHttp.FindStringSubmatch(fullUrl); matches != nil {
 		transport = &http.Transport{
@@ -237,6 +237,7 @@ func run(args []string) RunResponse {
 				return net.Dial("unix", matches[1])
 			},
 		}
+		fullUrl = "http://unix" + matches[2]
 	}
 	client := &http.Client{
 		Transport: transport,
