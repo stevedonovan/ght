@@ -1,13 +1,13 @@
 package main
 
 import (
-	"context"
+	//"context"
 	//"flag"
 	"fmt"
 	"github.com/stevedonovan/ght/term"
 	"io"
 	"io/ioutil"
-	"net"
+	//"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -229,18 +229,18 @@ func run(args []string) RunResponse {
 		fmt.Println("Url", fullUrl)
 		return RunResponse{}
 	}
-	var unixHttp = regexp.MustCompile(`https?://\[([^]]+)\](.+)`)
-	var transport *http.Transport = nil
-	if matches := unixHttp.FindStringSubmatch(fullUrl); matches != nil {
-		transport = &http.Transport{
-			DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
-				return net.Dial("unix", matches[1])
-			},
-		}
-		fullUrl = "http://unix" + matches[2]
-	}
+	//~ var unixHttp = regexp.MustCompile(`https?://\[([^]]+)\](.+)`)
+	//~ var transport *http.Transport = nil
+	//~ if matches := unixHttp.FindStringSubmatch(fullUrl); matches != nil {
+		//~ transport = &http.Transport{
+			//~ DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
+				//~ return net.Dial("unix", matches[1])
+			//~ },
+		//~ }
+		//~ fullUrl = "http://unix" + matches[2]
+	//~ }
 	client := &http.Client{
-		Transport: transport,
+//		Transport: transport,
 	}
 	var rdr io.Reader
 	if data.Payload != "" {
@@ -284,7 +284,7 @@ func run(args []string) RunResponse {
 			err = ioutil.WriteFile(path, body, 0644)
 			checke(err)
 			body = nil
-		} else if wasJson || sbody[0]=='{'{
+		} else if wasJson || (len(sbody) > 0 && sbody[0]=='{') {
 			unmarshal(sbody, &js)
 			if js != nil {
 				if ! wasJson {
