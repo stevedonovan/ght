@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/stevedonovan/ght/pointer"
 	"github.com/stevedonovan/ght/term"
+	"io/ioutil"
 	"log"
 	"net/url"
 	"os"
@@ -117,6 +118,17 @@ func valueToInterface(value string) interface{} {
 	}
 	if value == "true" || value == "false" {
 		return value == "true"
+	}
+	if strings.HasPrefix(value,"@") {
+		value = value[1:]
+		if strings.HasPrefix(value,"@") {
+			return value
+		}
+		b,e := ioutil.ReadFile(value)
+		if e != nil {
+			log.Fatal(e)
+		}
+		return string(b)
 	}
 	if v, err := strconv.ParseFloat(value, 64); err == nil {
 		return v
