@@ -23,19 +23,19 @@ type Strings = []string
 type SMap = map[string]string
 
 type RequestData struct {
-	Method   string     `json:"method,omitempty"`
-	Payload  string     `json:"payload,omitempty"`
-	Base     string     `json:"base,omitempty"`
-	Url      string     `json:"url,omitempty"`
-	Vars     Map       `json:"vars,omitempty"`
-	Query    Map  `json:"query,omitempty"`
-	Headers  [][]string `json:"headers,omitempty"`
-	User     string     `json:"user,omitempty"`
-	Password string     `json:"password,omitempty"`
+	Method       string       `json:"method,omitempty"`
+	Payload      string       `json:"payload,omitempty"`
+	Base         string       `json:"base,omitempty"`
+	Url          string       `json:"url,omitempty"`
+	Vars         Map          `json:"vars,omitempty"`
+	Query        Map          `json:"query,omitempty"`
+	Headers      [][]string   `json:"headers,omitempty"`
+	User         string       `json:"user,omitempty"`
+	Password     string       `json:"password,omitempty"`
 	OutputFormat OutputFormat `json:"output_format,omitempty"`
-	Help string `json:"help,omitempty"`
-	Args []string `json:"args,omitempty"`
-	Pairs       Pairs `json:"pairs,omitempty"`
+	Help         string       `json:"help,omitempty"`
+	Args         []string     `json:"args,omitempty"`
+	Pairs        Pairs        `json:"pairs,omitempty"`
 
 	// private
 	mimeType    string
@@ -43,7 +43,7 @@ type RequestData struct {
 	saveName    string
 	namespace   string
 	fromFile    string
-	help bool
+	help        bool
 }
 
 func (rd *RequestData) merge(other *RequestData, partial bool) {
@@ -128,16 +128,16 @@ func runAndPrint(args Strings) {
 	resp := run(args)
 	failed := !(resp.statusCode >= 200 && resp.statusCode < 300)
 	if failed && resp.statusCode != 0 {
-		term.BrightRed(os.Stderr, "status %d\n",resp.statusCode)
+		term.BrightRed(os.Stderr, "status %d\n", resp.statusCode)
 		os.Exit(1)
 	}
-	e := resp.outputFormat.process(resp.js,resp.body,resp.data)
+	e := resp.outputFormat.process(resp.js, resp.body, resp.data)
 	checke(e)
 }
 
 type RunResponse struct {
 	js            interface{} // non-nil if we got JSON
-	body          []byte // body as text otherwise
+	body          []byte      // body as text otherwise
 	contentType   string
 	contentLength int
 	statusCode    int
@@ -181,8 +181,7 @@ func run(args []string) RunResponse {
 				file = expandVariables(file, data.Vars)
 			}
 			data.Payload, data.mimeType = loadFileIfPossible(file)
-		} else
-		if key == "" {
+		} else if key == "" {
 			data.Payload, data.mimeType = value, "text/plain"
 		}
 	}
@@ -226,21 +225,21 @@ func run(args []string) RunResponse {
 		}
 	}
 	if !fetch {
-		fmt.Println("Url", fullUrl)
+		fmt.Println("Endpoint", fullUrl)
 		return RunResponse{}
 	}
 	//~ var unixHttp = regexp.MustCompile(`https?://\[([^]]+)\](.+)`)
 	//~ var transport *http.Transport = nil
 	//~ if matches := unixHttp.FindStringSubmatch(fullUrl); matches != nil {
-		//~ transport = &http.Transport{
-			//~ DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
-				//~ return net.Dial("unix", matches[1])
-			//~ },
-		//~ }
-		//~ fullUrl = "http://unix" + matches[2]
+	//~ transport = &http.Transport{
+	//~ DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
+	//~ return net.Dial("unix", matches[1])
+	//~ },
+	//~ }
+	//~ fullUrl = "http://unix" + matches[2]
 	//~ }
 	client := &http.Client{
-//		Transport: transport,
+		//		Transport: transport,
 	}
 	var rdr io.Reader
 	if data.Payload != "" {
@@ -260,7 +259,7 @@ func run(args []string) RunResponse {
 		js := requestToJson(req)
 		js["output_format"] = data.OutputFormat
 		return RunResponse{
-			js: js,
+			js:          js,
 			contentType: "application/json",
 		}
 	}
@@ -279,15 +278,15 @@ func run(args []string) RunResponse {
 		// strong opinion: should just be able to get files
 		if data.getShortcut && resp.StatusCode == 200 {
 			path := filepath.Base(fullUrl)
-			path = strings.ReplaceAll(path,"?","@")
-			path = strings.ReplaceAll(path,"&","@")
+			path = strings.ReplaceAll(path, "?", "@")
+			path = strings.ReplaceAll(path, "&", "@")
 			err = ioutil.WriteFile(path, body, 0644)
 			checke(err)
 			body = nil
-		} else if wasJson || (len(sbody) > 0 && sbody[0]=='{') {
+		} else if wasJson || (len(sbody) > 0 && sbody[0] == '{') {
 			unmarshal(sbody, &js)
 			if js != nil {
-				if ! wasJson {
+				if !wasJson {
 					// because it actually was!
 					contentType = "application/json"
 				}
@@ -335,13 +334,11 @@ func (data *RequestData) parse(args []string) bool {
 		wasLast = true
 		data.Method = "GET"
 		args = append([]string{"file:", "LAST"}, args[1:]...)
-	} else
-	if isUrl(args[0]) {
+	} else if isUrl(args[0]) {
 		data.getShortcut = true
 		data.Method = "GET"
 		data.Url, args = args[0], args[1:]
-	} else
-	if !ok {
+	} else if !ok {
 		method = args[0]
 		pdata, ok := readConfigSingle(method)
 		if !ok {
@@ -377,11 +374,11 @@ func (data *RequestData) parse(args []string) bool {
 		}
 		for len(args) > 0 {
 			flag = args[0]
-			if isVar(flag) || strings.HasSuffix(flag,":") {
+			if isVar(flag) || strings.HasSuffix(flag, ":") {
 				break
 			}
 			if i >= len(data.Args) {
-				quit(fmt.Sprintf("needed %d args, got %d\n",len(data.Args),i))
+				quit(fmt.Sprintf("needed %d args, got %d\n", len(data.Args), i))
 			}
 			data.Vars[data.Args[i]] = valueToInterface(flag)
 			args = args[1:]
@@ -428,8 +425,8 @@ func (data *RequestData) parse(args []string) bool {
 		case "q:", "query:":
 			pairs, args = grabWhilePairs(args)
 			pmap := pairsToMap(pairs)
-			data.Query = make(Map,len(pmap))
-			for k,v := range pmap {
+			data.Query = make(Map, len(pmap))
+			for k, v := range pmap {
 				data.Query[k] = v
 			}
 		case "h:", "head:":
@@ -471,10 +468,10 @@ func (data *RequestData) parse(args []string) bool {
 			parts := strings.Split(args[0], "=")
 			if len(parts) > 1 {
 				switch parts[0] {
-				case "m","help":
+				case "m", "help":
 					data.Help = parts[1]
 				case "args":
-					data.Args = strings.Split(parts[1],",")
+					data.Args = strings.Split(parts[1], ",")
 				default:
 					quit("only m,help or args allowed here")
 				}
@@ -508,7 +505,7 @@ func isUrl(s string) bool {
 func parseQueryPairs(m Map) url.Values {
 	q := make(url.Values)
 	for key := range m {
-		q.Add(key, fmt.Sprintf("%v",m[key]))
+		q.Add(key, fmt.Sprintf("%v", m[key]))
 	}
 	return q
 }
@@ -516,7 +513,7 @@ func parseQueryPairs(m Map) url.Values {
 func parseHeaders(pairs [][]string, vars Map) http.Header {
 	q := make(http.Header)
 	for _, p := range pairs {
-		val := expandVariables(p[1],vars)
+		val := expandVariables(p[1], vars)
 		q.Add(p[0], val)
 	}
 	return q

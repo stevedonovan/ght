@@ -6,6 +6,7 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
+	"net/http/httputil"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -14,20 +15,19 @@ import (
 type Mapa = map[string][]string
 
 func uploadHandler(w http.ResponseWriter, r *http.Request) {
-	file := strings.TrimPrefix(r.RequestURI,"/upload/")
+	file := strings.TrimPrefix(r.RequestURI, "/upload/")
 	contents, e := ioutil.ReadAll(r.Body)
 	r.Body.Close()
 	if e != nil {
-		http.Error(w,"cannot read body", http.StatusInternalServerError)
+		http.Error(w, "cannot read body", http.StatusInternalServerError)
 	} else {
-		e = ioutil.WriteFile(file,contents,0644)
+		e = ioutil.WriteFile(file, contents, 0644)
 		if e != nil {
-			http.Error(w,"cannot write "+file,http.StatusBadRequest)
+			http.Error(w, "cannot write "+file, http.StatusBadRequest)
 		}
-		log.Printf("upload: wrote %q (%d)", file,len(contents))
+		log.Printf("upload: wrote %q (%d)", file, len(contents))
 	}
 }
-
 
 func requestToJson(r *http.Request) Map {
 	b := []byte{}
@@ -66,7 +66,7 @@ func anyHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func squashArray(in Mapa) SMap {
-	res := make(SMap,len(in))
+	res := make(SMap, len(in))
 	for k, v := range in {
 		res[k] = v[0]
 	}
@@ -90,17 +90,17 @@ func execHandler(w http.ResponseWriter, r *http.Request) {
 	command := cc["cmd"]
 	var cmd *exec.Cmd
 	if runtime.GOOS == "windows" {
-		cmd = exec.Command("cmd","/c", command)
+		cmd = exec.Command("cmd", "/c", command)
 	} else {
 		cmd = exec.Command("sh", "-c", command)
 	}
-	if dir,ok := cc["dir"]; ok {
+	if dir, ok := cc["dir"]; ok {
 		cmd.Dir = dir
 	}
 	stdoutf, _ := cmd.StdoutPipe()
 	stderrf, _ := cmd.StderrPipe()
 	cmd.Start()
-	res := map[string]string {}
+	res := map[string]string{}
 	out_bytes, _ := ioutil.ReadAll(stdoutf)
 	res["stdout"] = string(out_bytes)
 	err_bytes, _ := ioutil.ReadAll(stderrf)
@@ -114,12 +114,22 @@ func execHandler(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "%s", o)
 }
 
-
 func runServer(args []string) {
 	http.HandleFunc("/any/", anyHandler)
 	http.Handle("/download/", gziphandler.GzipHandler(
 		http.StripPrefix("/download/", http.FileServer(http.Dir(".")))))
 	http.HandleFunc("/upload/", uploadHandler)
 	http.HandleFunc("/exec", execHandler)
+	http.HandleFunc("/echo/", echoHandler)
 	log.Fatal(http.ListenAndServe(args[0], nil))
+}
+
+func echoHandler(w http.ResponseWriter, r *http.Request) {
+	bb, err := httputil.DumpRequest(r, true)
+	if err != nil {
+		log.Println("cannot dump", err)
+	} else {
+		log.Println(string(bb))
+	}
+	fmt.Fprintf(w, "ok")
 }
