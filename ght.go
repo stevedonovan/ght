@@ -130,9 +130,9 @@ type RunResponse struct {
 func run(args []string) RunResponse {
 	var data RequestData
 
-	fetch := data.parse(args)
+	test := !data.parse(args)
 
-	if !fetch {
+	if test {
 		if len(data.Vars) > 0 {
 			fmt.Println("Vars", data.Vars)
 		}
@@ -163,7 +163,7 @@ func run(args []string) RunResponse {
 			data.Payload = payload
 		}
 	}
-	if !fetch && len(data.Payload) > 0 && data.mimeType == "application/json" {
+	if test && len(data.Payload) > 0 && data.mimeType == "application/json" {
 		fmt.Print("Payload", data.Payload)
 	}
 	if containsVarExpansions(data.OutputFormat.File) {
@@ -190,7 +190,7 @@ func run(args []string) RunResponse {
 			fullUrl += "?" + query
 		}
 	}
-	if !fetch {
+	if test {
 		fmt.Println("Endpoint", fullUrl)
 		return RunResponse{}
 	}
@@ -215,6 +215,16 @@ func run(args []string) RunResponse {
 
 	req, err := http.NewRequest(data.Method, fullUrl, rdr)
 	checke(err)
+
+	envVars := os.Environ()
+	for _, v := range envVars {
+		pair, ok := strings.CutPrefix(v, "GHT_HDR_")
+		if ok {
+			idx := strings.Index(pair, "=")
+			key, value := pair[:idx], pair[idx+1:]
+			data.Headers = append(data.Headers, []string{key, value})
+		}
+	}
 	if data.Headers != nil {
 		req.Header = parseHeaders(data.Headers, data.Vars)
 	}

@@ -346,6 +346,12 @@ func loadFileIfPossible(maybeFile string, forceJson bool) (string, string) {
 			checke(e)
 			contents, e = marshal(data, false)
 			checke(e)
+		} else if ext == ".json" {
+			var v any
+			err := unmarshal(contents, &v)
+			if err != nil {
+				quit("bad json file: " + err.Error())
+			}
 		}
 		mtype = "application/json"
 	}
