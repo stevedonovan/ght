@@ -153,30 +153,13 @@ func run(args []string) RunResponse {
 		return RunResponse{}
 	}
 
-	// so data may come in as a file, or by key-value Pairs
-	// The filename or the values may contain variable expansions
-	if len(data.Pairs) == 1 {
-		key, value := data.Pairs.KeyValue(0)
-		if key == "@" {
-			file := value
-			if containsVarExpansions(file) {
-				file = expandVariables(file, data.Vars)
-			}
-			data.Payload, data.mimeType = loadFileIfPossible(file, true)
-		} else if key == "" {
-			// that is, a simple string value
-			data.Payload, data.mimeType = value, "text/plain"
-		}
-	}
+	// so data may come in as key-value Pairs
 	if data.Payload == "" {
 		m := parsePairs(data.Pairs)
 		if len(m) > 0 {
 			payload, e := marshal(m, false)
 			checke(e)
 			data.mimeType = "application/json"
-			if containsVarExpansions(payload) {
-				payload = expandVariables(payload, data.Vars)
-			}
 			data.Payload = payload
 		}
 	}
@@ -381,8 +364,24 @@ func (data *RequestData) parse(args []string) bool {
 		case "d:", "data:":
 			data.Pairs, args = grabWhilePairs(args)
 			if len(data.Pairs) == 0 {
-				data.Pairs, args = NewFilePair(args[0]), args[1:]
+				file := args[0]
+				args = args[1:]
+				if strings.HasPrefix(file, "@") {
+					file = file[1:]
+					// as a file, always interpreted as JSON data (use body: otherwise)
+					data.Payload, data.mimeType = loadFileIfPossible(file, true)
+				} else {
+					data.Payload, data.mimeType = file, "text/plain"
+				}
 			}
+		case "b:", "body:":
+			var fname string
+			fname, args = args[0], args[1:]
+			data.Payload, data.mimeType = loadFileIfPossible(fname, false)
+		case "file:":
+			var fname string
+			fname, args = args[0], args[1:]
+			data.Payload, data.fromFile = loadFileIfPossible(fname, false)
 		case "v:", "vars:":
 			pairs, args = grabWhilePairs(args)
 			if len(pairs) == 0 {
@@ -420,10 +419,6 @@ func (data *RequestData) parse(args []string) bool {
 			args, e = data.OutputFormat.parse(args)
 			data.OutputFormat.Last = wasLast
 			checke(e)
-		case "file:":
-			var fname string
-			fname, args = args[0], args[1:]
-			data.Payload, data.fromFile = loadFileIfPossible(fname, false)
 		case "user:":
 			maybePair := args[0]
 			args = args[1:]

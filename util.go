@@ -24,7 +24,7 @@ func splitDot2(s string) (string, string, bool) {
 
 func pairsToMap(pairs [][]string) map[string]string {
 	m := make(map[string]string)
-	for _,p := range pairs {
+	for _, p := range pairs {
 		m[p[0]] = p[1]
 	}
 	return m
@@ -46,7 +46,7 @@ func checke(e error) {
 }
 
 func keys(m map[string]string) []string {
-	res := make([]string,len(m))
+	res := make([]string, len(m))
 	i := 0
 	for k := range m {
 		res[i] = k
@@ -57,11 +57,7 @@ func keys(m map[string]string) []string {
 
 type Pairs [][]string
 
-func NewFilePair(file string) Pairs {
-	return Pairs{{"@",file}}
-}
-
-func (p Pairs) KeyValue(idx int) (string,string) {
+func (p Pairs) KeyValue(idx int) (string, string) {
 	return p[idx][0], p[idx][1]
 }
 
@@ -119,12 +115,12 @@ func valueToInterface(value string) interface{} {
 	if value == "true" || value == "false" {
 		return value == "true"
 	}
-	if strings.HasPrefix(value,"@") {
+	if strings.HasPrefix(value, "@") {
 		value = value[1:]
-		if strings.HasPrefix(value,"@") {
+		if strings.HasPrefix(value, "@") {
 			return value
 		}
-		b,e := ioutil.ReadFile(value)
+		b, e := ioutil.ReadFile(value)
 		if e != nil {
 			log.Fatal(e)
 		}
@@ -137,60 +133,61 @@ func valueToInterface(value string) interface{} {
 	}
 }
 
-func readKeyValueFile(contents string) (Map,error) {
+func readKeyValueFile(contents string) (Map, error) {
 	res := make(Map)
 	pairs := [][]string{}
 	// Windows?
-	for _,line := range strings.Split(contents,"\n") {
+	for _, line := range strings.Split(contents, "\n") {
 		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line,"#") {
+		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
-		idx := strings.Index(line,"=")
+		idx := strings.Index(line, "=")
 		if idx == -1 {
-			return res,fmt.Errorf("cannot split %q in key/value Pairs with =", line)
+			return res, fmt.Errorf("cannot split %q in key/value Pairs with =", line)
 		}
-		pairs = append(pairs,[]string{line[:idx],line[idx+1:]})
+		pairs = append(pairs, []string{line[:idx], line[idx+1:]})
 	}
 	res = parsePairs(pairs)
-	return res,nil
+	return res, nil
 }
 
 func containsVarExpansions(s string) bool {
 	return varExpansion.MatchString(s)
 }
+
 var (
 	//regularVar = regexp.MustCompile(`[a-z][\w_-]*`)
 	varExpansion = regexp.MustCompile(`{[/?]*[a-zA-Z][\w_\-,.]*}`)
 )
 
 type Pair struct {
-	name string
+	name  string
 	value string
 }
 
 func expandVariables(value string, vars Map) string {
-	return varExpansion.ReplaceAllStringFunc(value,func(s string) string {
-		s = s[1:len(s)-1] // trim the {}
+	return varExpansion.ReplaceAllStringFunc(value, func(s string) string {
+		s = s[1 : len(s)-1] // trim the {}
 		if s[0] == '/' || s[0] == '?' {
 			op := s[0]
 			s = s[1:]
 			pairs := []Pair{}
-			for _,p := range strings.Split(s,",") {
+			for _, p := range strings.Split(s, ",") {
 				r := lookup(p, vars, false)
 				if r != "" {
-					pairs = append(pairs,Pair{p,r})
+					pairs = append(pairs, Pair{p, r})
 				}
 			}
 			subst := strings.Builder{}
 			if op == '/' {
-				for _,p := range pairs {
+				for _, p := range pairs {
 					value := url.PathEscape(p.value)
 					subst.WriteString("/" + value)
 				}
 			} else {
 				sep := "?"
-				for _,p := range pairs {
+				for _, p := range pairs {
 					value := url.QueryEscape(p.value)
 					subst.WriteString(sep + p.name + "=" + value)
 					sep = "&"
@@ -205,7 +202,7 @@ func expandVariables(value string, vars Map) string {
 
 func lookup(s string, vars Map, full bool) string {
 	if full {
-		r,e := pointer.Filter(vars,s,nil)
+		r, e := pointer.Filter(vars, s, nil)
 		if e != nil {
 			if v := os.Getenv(s); v != "" {
 				return v
@@ -214,9 +211,9 @@ func lookup(s string, vars Map, full bool) string {
 				return ""
 			}
 		}
-		return fmt.Sprintf("%v",r)
+		return fmt.Sprintf("%v", r)
 	} else if r, ok := vars[s]; ok {
-		return fmt.Sprintf("%v",r)
+		return fmt.Sprintf("%v", r)
 	} else {
 		log.Printf("%q is not defined", s)
 		return ""
