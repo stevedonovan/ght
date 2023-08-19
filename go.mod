@@ -12,5 +12,6 @@ require (
 
 require (
 	github.com/Azure/go-ansiterm v0.0.0-20210617225240-d185dfc1b5a1 // indirect
+	github.com/gofor-little/env v1.0.14 // indirect
 	golang.org/x/sys v0.1.0 // indirect
 )

@@ -137,8 +137,8 @@ type OutputFormat struct {
 	JPointer string `json:"j_pointer,omitempty"`
 	OType    string `json:"o_type,omitempty"`
 	File     string `json:"file,omitempty"`
-	Last bool `json:"last,omitempty"`
-	Merge string `json:"merge,omitempty"`
+	Last     bool   `json:"last,omitempty"`
+	Merge    string `json:"merge,omitempty"`
 }
 
 func (of OutputFormat) process(js interface{}, body []byte, data Map) error {
@@ -146,7 +146,7 @@ func (of OutputFormat) process(js interface{}, body []byte, data Map) error {
 	if js == nil {
 		if len(body) > 0 {
 			if of.File != "" {
-				e := ioutil.WriteFile(of.File,body,0666)
+				e := ioutil.WriteFile(of.File, body, 0666)
 				checke(e)
 			} else {
 				pageOut(string(body), false, of.Last)
@@ -177,9 +177,9 @@ func (of OutputFormat) process(js interface{}, body []byte, data Map) error {
 		}
 	}
 	if of.Merge != "" {
-		if m,ok := res.(Map); ok {
-			for k,v := range data {
-				if _,ok := m[k]; !ok {
+		if m, ok := res.(Map); ok {
+			for k, v := range data {
+				if _, ok := m[k]; !ok {
 					m[k] = v
 				}
 			}
@@ -207,8 +207,8 @@ func (of OutputFormat) process(js interface{}, body []byte, data Map) error {
 		out, e = marshalNdJson(res)
 	case "txt":
 		out, ok = res.(string)
-		if ! ok {
-			return fmt.Errorf("value was %T, not string",res)
+		if !ok {
+			return fmt.Errorf("value was %T, not string", res)
 		}
 		out += "\n"
 	default:
@@ -247,17 +247,17 @@ var dataTypes = map[string]string {
 	".tsv": "tsv",
 }
 
- */
+*/
 
-func lookupAlt(key1,key2 string, m map[string]string) string {
+func lookupAlt(key1, key2 string, m map[string]string) string {
 	val, ok := m[key1]
 	if ok {
-		delete(m,key1)
+		delete(m, key1)
 		return val
 	}
 	val, ok = m[key2]
 	if ok {
-		delete(m,key2)
+		delete(m, key2)
 		return val
 	}
 	return ""
@@ -268,12 +268,12 @@ func (ofp *OutputFormat) parse(args []string) ([]string, error) {
 	pairs, args = grabWhilePairs(args)
 	if len(pairs) > 0 {
 		m := pairsToMap(pairs)
-		ofp.JPointer = lookupAlt("f","field",m)
-		ofp.OType = lookupAlt("F","format",m)
-		ofp.File = lookupAlt("o","file",m)
-		ofp.Merge = lookupAlt("m","merge",m)
+		ofp.JPointer = lookupAlt("f", "field", m)
+		ofp.OType = lookupAlt("F", "format", m)
+		ofp.File = lookupAlt("o", "file", m)
+		ofp.Merge = lookupAlt("m", "merge", m)
 		if len(m) > 0 {
-			quit("unrecognized output field " + strings.Join(keys(m),","))
+			quit("unrecognized output field " + strings.Join(keys(m), ","))
 		}
 	} else {
 		ofp.File, args = args[0], args[1:]
@@ -284,22 +284,22 @@ func (ofp *OutputFormat) parse(args []string) ([]string, error) {
 func pageOut(txt string, pretty bool, last bool) {
 	// Page will *only* save the response if it was a genuine request
 	// and not just 'ght last'
-	lastText := term.Page(txt, pretty, ! last)
+	lastText := term.Page(txt, pretty, !last)
 	if lastText != "" {
 		ext := ""
 		if pretty {
 			ext = ".json"
 		}
-		e := writeCacheFile("LAST",lastText)
+		e := writeCacheFile("LAST", lastText)
 		if e == nil {
-			e = writeCacheFile("EXT",ext)
+			e = writeCacheFile("EXT", ext)
 		}
 		checke(e)
 	}
 }
 
 func nameOf(f string) string {
-	idx := strings.LastIndex(f,".")
+	idx := strings.LastIndex(f, ".")
 	if idx == -1 {
 		return f
 	} else {
@@ -307,24 +307,17 @@ func nameOf(f string) string {
 	}
 }
 
-func loadFileIfPossible(maybeFile string) (string, string) {
-	forceJson := false
-	// forcing incoming YAML to be translated into a JSON document
-	if strings.HasSuffix(maybeFile,":json") {
-		maybeFile = maybeFile[0:len(maybeFile)-5]
-		forceJson = true
-	}
-	ext := filepath.Ext(maybeFile)
+func loadFileIfPossible(maybeFile string, forceJson bool) (string, string) {
 	var bb []byte
 	var s string
 	var e error
+	ext := filepath.Ext(maybeFile)
 	name := nameOf(maybeFile)
 	if name == "IN" {
 		var buf bytes.Buffer
 		_, e = io.Copy(&buf, os.Stdin)
 		bb = buf.Bytes()
-	} else
-	if name == "LAST" {
+	} else if name == "LAST" {
 		// cf pageOut in this file
 		s, e = readCacheFile("LAST")
 		if e == nil {
@@ -332,7 +325,7 @@ func loadFileIfPossible(maybeFile string) (string, string) {
 		}
 		bb = []byte(s)
 	} else {
-		bb, e = ioutil.ReadFile(maybeFile)
+		bb, e = os.ReadFile(maybeFile)
 	}
 	checke(e)
 	mtype := mime.TypeByExtension(ext)
@@ -340,7 +333,7 @@ func loadFileIfPossible(maybeFile string) (string, string) {
 		mtype = "text/plain"
 	}
 	contents := string(bb)
-	if forceJson  {
+	if forceJson {
 		if ext == ".yml" || ext == ".yaml" {
 			var data interface{}
 			e = unmarshallYAML(contents, &data)
@@ -348,9 +341,8 @@ func loadFileIfPossible(maybeFile string) (string, string) {
 			data = pointer.MassageYaml(data)
 			contents, e = marshal(data, false)
 			checke(e)
-		} else
-		if ext == ".kvj" {
-			data,e := readKeyValueFile(contents)
+		} else if ext == ".kvj" {
+			data, e := readKeyValueFile(contents)
 			checke(e)
 			contents, e = marshal(data, false)
 			checke(e)

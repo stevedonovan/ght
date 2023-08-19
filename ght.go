@@ -12,7 +12,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strconv"
 	"strings"
 )
@@ -98,27 +97,10 @@ func main() {
 		quit("ght <method> <values> <fragment>")
 	}
 	if args[0] == "server" {
+		if len(args) != 2 {
+			quit("ght server <bind-address>")
+		}
 		runServer(args[1:])
-		return
-	}
-	if len(args) == 1 && filepath.Ext(args[0]) == ".ght" {
-		contents, e := ioutil.ReadFile(args[0])
-		checke(e)
-		wspace := regexp.MustCompile(`\s+`)
-		actualArgs := Strings{}
-		for _, line := range strings.Split(string(contents), "\n") {
-			if strings.HasPrefix(line, "#") {
-				if len(actualArgs) > 0 {
-					runAndPrint(actualArgs)
-					actualArgs = Strings{}
-				}
-			} else {
-				actualArgs = append(actualArgs, wspace.Split(line, -1)...)
-			}
-		}
-		if len(actualArgs) > 0 {
-			runAndPrint(actualArgs)
-		}
 	} else {
 		runAndPrint(args)
 	}
@@ -180,8 +162,9 @@ func run(args []string) RunResponse {
 			if containsVarExpansions(file) {
 				file = expandVariables(file, data.Vars)
 			}
-			data.Payload, data.mimeType = loadFileIfPossible(file)
+			data.Payload, data.mimeType = loadFileIfPossible(file, true)
 		} else if key == "" {
+			// that is, a simple string value
 			data.Payload, data.mimeType = value, "text/plain"
 		}
 	}
@@ -403,7 +386,7 @@ func (data *RequestData) parse(args []string) bool {
 		case "v:", "vars:":
 			pairs, args = grabWhilePairs(args)
 			if len(pairs) == 0 {
-				contents, mtype := loadFileIfPossible(args[0])
+				contents, mtype := loadFileIfPossible(args[0], false)
 				if mtype != "application/json" {
 					quit("vars can only be set with JSON currently")
 				}
@@ -440,7 +423,7 @@ func (data *RequestData) parse(args []string) bool {
 		case "file:":
 			var fname string
 			fname, args = args[0], args[1:]
-			data.Payload, data.fromFile = loadFileIfPossible(fname)
+			data.Payload, data.fromFile = loadFileIfPossible(fname, false)
 		case "user:":
 			maybePair := args[0]
 			args = args[1:]
