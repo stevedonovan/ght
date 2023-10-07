@@ -1,8 +1,10 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"github.com/NYTimes/gziphandler"
+	"io"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -10,6 +12,7 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
+	"time"
 )
 
 type Mapa = map[string][]string
@@ -88,11 +91,14 @@ func execHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	command := cc["cmd"]
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+
 	var cmd *exec.Cmd
 	if runtime.GOOS == "windows" {
-		cmd = exec.Command("cmd", "/c", command)
+		cmd = exec.CommandContext(ctx, "cmd", "/c", command)
 	} else {
-		cmd = exec.Command("sh", "-c", command)
+		cmd = exec.CommandContext(ctx, "sh", "-c", command)
 	}
 	if dir, ok := cc["dir"]; ok {
 		cmd.Dir = dir
@@ -101,9 +107,9 @@ func execHandler(w http.ResponseWriter, r *http.Request) {
 	stderrf, _ := cmd.StderrPipe()
 	cmd.Start()
 	res := map[string]string{}
-	out_bytes, _ := ioutil.ReadAll(stdoutf)
+	out_bytes, _ := io.ReadAll(stdoutf)
 	res["stdout"] = string(out_bytes)
-	err_bytes, _ := ioutil.ReadAll(stderrf)
+	err_bytes, _ := io.ReadAll(stderrf)
 	res["stderr"] = string(err_bytes)
 	e = cmd.Wait()
 	if e != nil {

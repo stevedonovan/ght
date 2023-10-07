@@ -5,11 +5,11 @@ import (
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
+	"github.com/flynn/json5"
 	"github.com/stevedonovan/ght/pointer"
 	"github.com/stevedonovan/ght/term"
 	"gopkg.in/yaml.v2"
 	"io"
-	"io/ioutil"
 	"mime"
 	"os"
 	"path/filepath"
@@ -31,6 +31,11 @@ func marshal(data interface{}, indent bool) (string, error) {
 
 func unmarshal(text string, obj interface{}) error {
 	dec := json.NewDecoder(strings.NewReader(text))
+	return dec.Decode(obj)
+}
+
+func unmarshal5(text string, obj interface{}) error {
+	dec := json5.NewDecoder(strings.NewReader(text))
 	return dec.Decode(obj)
 }
 
@@ -146,10 +151,10 @@ func (of OutputFormat) process(js interface{}, body []byte, data Map) error {
 	if js == nil {
 		if len(body) > 0 {
 			if of.File != "" {
-				e := ioutil.WriteFile(of.File, body, 0666)
+				e := os.WriteFile(of.File, body, 0666)
 				checke(e)
 			} else {
-				pageOut(string(body), false, of.Last)
+				of.pageOut(string(body), false)
 			}
 		}
 		return nil
@@ -170,7 +175,6 @@ func (of OutputFormat) process(js interface{}, body []byte, data Map) error {
 	}
 	var keys []string
 	if of.JPointer != "" {
-		//needsArray := ot == "tsv" || ot == "csv" || ot == "ndjson"
 		res, e = pointer.Filter(js, of.JPointer, &keys)
 		if e != nil {
 			return e
@@ -199,13 +203,13 @@ func (of OutputFormat) process(js interface{}, body []byte, data Map) error {
 		out, e = marshalCSV(res, '\t', keys)
 	case "csv":
 		out, e = marshalCSV(res, ',', keys)
-	case "yaml":
+	case "yaml", "yml":
 		out, e = marshalYAML(res)
-	case "json":
+	case "json", "js":
 		out, e = marshal(res, true)
 	case "ndjson":
 		out, e = marshalNdJson(res)
-	case "txt":
+	case "txt", "text":
 		out, ok = res.(string)
 		if !ok {
 			return fmt.Errorf("value was %T, not string", res)
@@ -227,27 +231,26 @@ func (of OutputFormat) process(js interface{}, body []byte, data Map) error {
 		}
 		_, e = f.Write([]byte(out))
 	} else {
-		pageOut(out, ot == "json" || ot == "ndjson", of.Last)
+		of.pageOut(out, ot == "json" || ot == "ndjson")
 	}
 	return e
 
 }
 
+func lastFile() string {
+	return filepath.Join(os.TempDir(), "ght_last")
+}
+
+func (of *OutputFormat) pageOut(txt string, pretty bool) {
+	term.Page(txt, pretty)
+	if !of.Last {
+		os.WriteFile(lastFile(), []byte(txt), 0644)
+	}
+}
+
 func (of *OutputFormat) empty() bool {
 	return of.JPointer == "" && of.OType == "" && of.File == ""
 }
-
-/*
-var dataTypes = map[string]string {
-	".json": "json",
-	".yaml": "yaml",
-	".yml": "yaml",
-	".csv": "csv",
-	".ndjson": "json",
-	".tsv": "tsv",
-}
-
-*/
 
 func lookupAlt(key1, key2 string, m map[string]string) string {
 	val, ok := m[key1]
@@ -268,9 +271,9 @@ func (ofp *OutputFormat) parse(args []string) ([]string, error) {
 	pairs, args = grabWhilePairs(args)
 	if len(pairs) > 0 {
 		m := pairsToMap(pairs)
-		ofp.JPointer = lookupAlt("f", "field", m)
-		ofp.OType = lookupAlt("F", "format", m)
-		ofp.File = lookupAlt("o", "file", m)
+		ofp.JPointer = lookupAlt("F", "field", m)
+		ofp.OType = lookupAlt("t", "type", m)
+		ofp.File = lookupAlt("f", "file", m)
 		ofp.Merge = lookupAlt("m", "merge", m)
 		if len(m) > 0 {
 			quit("unrecognized output field " + strings.Join(keys(m), ","))
@@ -279,23 +282,6 @@ func (ofp *OutputFormat) parse(args []string) ([]string, error) {
 		ofp.File, args = args[0], args[1:]
 	}
 	return args, nil
-}
-
-func pageOut(txt string, pretty bool, last bool) {
-	// Page will *only* save the response if it was a genuine request
-	// and not just 'ght last'
-	lastText := term.Page(txt, pretty, !last)
-	if lastText != "" {
-		ext := ""
-		if pretty {
-			ext = ".json"
-		}
-		e := writeCacheFile("LAST", lastText)
-		if e == nil {
-			e = writeCacheFile("EXT", ext)
-		}
-		checke(e)
-	}
 }
 
 func nameOf(f string) string {
@@ -309,7 +295,6 @@ func nameOf(f string) string {
 
 func loadFileIfPossible(maybeFile string, forceJson bool) (string, string) {
 	var bb []byte
-	var s string
 	var e error
 	ext := filepath.Ext(maybeFile)
 	name := nameOf(maybeFile)
@@ -317,13 +302,6 @@ func loadFileIfPossible(maybeFile string, forceJson bool) (string, string) {
 		var buf bytes.Buffer
 		_, e = io.Copy(&buf, os.Stdin)
 		bb = buf.Bytes()
-	} else if name == "LAST" {
-		// cf pageOut in this file
-		s, e = readCacheFile("LAST")
-		if e == nil {
-			ext, e = readCacheFile("EXT")
-		}
-		bb = []byte(s)
 	} else {
 		bb, e = os.ReadFile(maybeFile)
 	}
@@ -348,10 +326,12 @@ func loadFileIfPossible(maybeFile string, forceJson bool) (string, string) {
 			checke(e)
 		} else if ext == ".json" {
 			var v any
-			err := unmarshal(contents, &v)
+			err := unmarshal5(contents, &v)
 			if err != nil {
-				quit("bad json file: " + err.Error())
+				quit("bad json5 file: " + err.Error())
 			}
+			contents, err = marshal(v, false)
+			checke(e)
 		}
 		mtype = "application/json"
 	}

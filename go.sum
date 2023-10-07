@@ -48,6 +48,8 @@ github.com/edgexfoundry/edgex-cli v1.0.1 h1:v0l/UAIECK4GC5fkUWsK5BwbHkXdKq2TVWcd
 github.com/edgexfoundry/edgex-cli v1.0.1/go.mod h1:fhYzSyVBQZRysE+QepNnQg7mzAYdFxtQiPsEgXst5vc=
 github.com/edgexfoundry/go-mod-core-contracts v0.1.111/go.mod h1:84hDSh/zad/Tc56pSMW0yVLRS7BjAOxFCjW/2VJ9bio=
 github.com/fatih/color v1.7.0/go.mod h1:Zm6kSWBoL9eyXnKyktHP6abPY2pDugNf5KwzbycvMj4=
+github.com/flynn/json5 v0.0.0-20160717195620-7620272ed633 h1:xJMmr4GMYIbALX5edyoDIOQpc2bOQTeJiWMeCl9lX/8=
+github.com/flynn/json5 v0.0.0-20160717195620-7620272ed633/go.mod h1:NJDK3/o7abx6PP54EOe0G0n0RLmhCo9xv61gUYpI0EY=
 github.com/fsnotify/fsnotify v1.4.7/go.mod h1:jwhsz4b93w/PPRr/qN1Yymfu8t87LnFCMoQvtojpjFo=
 github.com/fxamacker/cbor/v2 v2.2.0/go.mod h1:TA1xS00nchWmaBnEIxPSE5oHLuJBAVvqrtAnWBwBCVo=
 github.com/ghodss/yaml v1.0.0/go.mod h1:4dBDuWmgqj2HViK6kFavaiC9ZROes6MMH2rRYeMEF04=

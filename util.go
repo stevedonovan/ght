@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"github.com/stevedonovan/ght/pointer"
 	"github.com/stevedonovan/ght/term"
-	"io/ioutil"
 	"log"
 	"net/url"
 	"os"
@@ -104,8 +103,9 @@ func setKey(m Map, key string, value interface{}) {
 }
 
 func valueToInterface(value string) interface{} {
-	parts := strings.Split(value, ",")
-	if len(parts) > 1 {
+	if strings.HasPrefix(value, "[") && strings.HasSuffix(value, "]") {
+		value = value[1 : len(value)-1]
+		parts := strings.Split(value, ",")
 		arr := make(Array, len(parts))
 		for i, p := range parts {
 			arr[i] = valueToInterface(p)
@@ -117,14 +117,17 @@ func valueToInterface(value string) interface{} {
 	}
 	if strings.HasPrefix(value, "@") {
 		value = value[1:]
-		if strings.HasPrefix(value, "@") {
+		if strings.HasPrefix(value, "@") { // then just escape @
 			return value
 		}
-		b, e := ioutil.ReadFile(value)
-		if e != nil {
-			log.Fatal(e)
+		b, e := loadFileIfPossible(value, true)
+		if e != "application/json" {
+			return b
+		} else {
+			var res interface{}
+			checke(unmarshal(b, &res))
+			return res
 		}
-		return string(b)
 	}
 	if v, err := strconv.ParseFloat(value, 64); err == nil {
 		return v
@@ -133,9 +136,8 @@ func valueToInterface(value string) interface{} {
 	}
 }
 
-func readKeyValueFile(contents string) (Map, error) {
-	res := make(Map)
-	pairs := [][]string{}
+func readKeyValuePairs(contents string) ([][]string, error) {
+	var pairs [][]string
 	// Windows?
 	for _, line := range strings.Split(contents, "\n") {
 		line = strings.TrimSpace(line)
@@ -144,9 +146,18 @@ func readKeyValueFile(contents string) (Map, error) {
 		}
 		idx := strings.Index(line, "=")
 		if idx == -1 {
-			return res, fmt.Errorf("cannot split %q in key/value Pairs with =", line)
+			return pairs, fmt.Errorf("cannot split %q in key/value Pairs with =", line)
 		}
 		pairs = append(pairs, []string{line[:idx], line[idx+1:]})
+	}
+	return pairs, nil
+}
+
+func readKeyValueFile(contents string) (Map, error) {
+	res := make(Map)
+	pairs, err := readKeyValuePairs(contents)
+	if err != nil {
+		return res, err
 	}
 	res = parsePairs(pairs)
 	return res, nil
