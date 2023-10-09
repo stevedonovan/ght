@@ -34,7 +34,7 @@ type RequestData struct {
 	User         string       `json:"user,omitempty"`
 	Password     string       `json:"password,omitempty"`
 	OutputFormat OutputFormat `json:"output_format,omitempty"`
-	Help         string       `json:"help,omitempty"`
+	Help         bool         `json:"help,omitempty"`
 	Args         []string     `json:"args,omitempty"`
 	Pairs        Pairs        `json:"pairs,omitempty"`
 	Req          bool         `json:"dump,omitempty"`
@@ -112,6 +112,9 @@ func run(args []string) RunResponse {
 
 	if !data.parse(args) {
 		quit("cannot parse")
+	}
+	if data.Help {
+		mainHelp()
 	}
 	if os.Getenv("DUMP_GHT_DATA") != "" {
 		fmt.Printf("we got %#v\n", data)
@@ -281,6 +284,8 @@ func (data *RequestData) parse(args []string) bool {
 				wasLast = true
 				contents, _ := os.ReadFile(lastFile())
 				data.Payload = string(contents)
+			} else if data.Method == "help" {
+				data.Help = true
 			} else {
 				quit("not a valid HTTP method " + data.Method)
 			}
@@ -294,6 +299,7 @@ func (data *RequestData) parse(args []string) bool {
 		switch flag {
 		case "d:", "data:":
 			data.Pairs, args = grabWhilePairs(args)
+			checkHelp(len(pairs) == 0, args, "data")
 			if len(data.Pairs) == 0 {
 				first := args[0]
 				args = args[1:]
@@ -309,26 +315,29 @@ func (data *RequestData) parse(args []string) bool {
 			}
 		case "b:", "body:":
 			var fname string
+			checkHelp(len(args) == 0, args, "body")
 			fname, args = args[0], args[1:]
 			if fname == "-" {
 				fname = "IN"
 			}
 			data.Payload, data.mimeType = loadFileIfPossible(fname, false)
-		case "req:":
+		case "req:", "request:":
 			if len(args) > 1 {
 				args = args[1:]
 			}
 			data.Req = true
-		case "resp:":
+		case "resp:", "response:":
 			if len(args) > 1 {
 				args = args[1:]
 			}
 			data.Resp = true
 		case "f:", "flags:":
 			pairs, args = grabWhilePairs(args)
+			checkHelp(len(pairs) == 0, args, "flags")
 			data.Flags = pairsToMap(pairs)
 		case "v:", "vars:":
 			pairs, args = grabWhilePairs(args)
+			checkHelp(len(pairs) == 0, args, "vars")
 			if len(pairs) == 0 {
 				contents, mtype := loadFileIfPossible(args[0], false)
 				if mtype != "application/json" {
@@ -351,6 +360,7 @@ func (data *RequestData) parse(args []string) bool {
 			}
 		case "q:", "query:":
 			pairs, args = grabWhilePairs(args)
+			checkHelp(len(pairs) == 0, args, "query")
 			pmap := pairsToMap(pairs)
 			data.Query = make(Map, len(pmap))
 			for k, v := range pmap {
@@ -358,13 +368,16 @@ func (data *RequestData) parse(args []string) bool {
 			}
 		case "h:", "head:":
 			pairs, args = grabWhilePairs(args)
+			checkHelp(len(pairs) == 0, args, "head")
 			data.Headers = pairs
 		case "o:", "out:":
 			var e error
+			checkHelp(len(args) == 0, args, "out")
 			args, e = data.OutputFormat.parse(args)
 			data.OutputFormat.Last = wasLast
 			checke(e)
 		case "user:":
+			checkHelp(len(args) == 0, args, "user")
 			maybePair := args[0]
 			args = args[1:]
 			parts := strings.Split(maybePair, "=")
@@ -373,6 +386,7 @@ func (data *RequestData) parse(args []string) bool {
 				data.Password = parts[1]
 			}
 		case "u:", "url:":
+			checkHelp(len(args) == 0, args, "url")
 			data.Base, args = args[0], args[1:]
 		default:
 			if flag == "" {
