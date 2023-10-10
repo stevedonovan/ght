@@ -332,6 +332,8 @@ func loadFileIfPossible(maybeFile string, forceJson bool) (string, string) {
 			}
 			contents, err = marshal(v, false)
 			checke(e)
+		} else {
+			return strings.TrimSpace(contents), "text/plain"
 		}
 		mtype = "application/json"
 	}
