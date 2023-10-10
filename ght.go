@@ -4,9 +4,9 @@ import (
 	//"context"
 	//"flag"
 	"fmt"
+	"github.com/google/shlex"
 	"github.com/stevedonovan/ght/term"
 	"io"
-	"io/ioutil"
 	"net/http/httputil"
 	"strconv"
 
@@ -35,7 +35,7 @@ type RequestData struct {
 	Password     string       `json:"password,omitempty"`
 	OutputFormat OutputFormat `json:"output_format,omitempty"`
 	Help         bool         `json:"help,omitempty"`
-	Args         []string     `json:"args,omitempty"`
+	Params       [][]string   `json:"args,omitempty"`
 	Pairs        Pairs        `json:"pairs,omitempty"`
 	Req          bool         `json:"dump,omitempty"`
 	Thru         bool         `json:"thru"`
@@ -70,17 +70,7 @@ func main() {
 		}
 		runServer(args[1:])
 	} else {
-		// any .env file?
-		bb, err := os.ReadFile(".env")
-		if err == nil {
-			pairs, err := readKeyValuePairs(string(bb))
-			if err != nil {
-				quit(err.Error())
-			}
-			for _, pair := range pairs {
-				os.Setenv(pair[0], pair[1])
-			}
-		}
+		_ = readEnvFile(".env")
 		runAndPrint(args)
 	}
 }
@@ -116,12 +106,23 @@ func run(args []string) RunResponse {
 	if data.Help {
 		mainHelp()
 	}
+
+	envVars := os.Environ()
+
 	if os.Getenv("DUMP_GHT_DATA") != "" {
 		fmt.Printf("we got %#v\n", data)
 	}
 	// so data may come in as key-value Pairs
 	if data.Payload == "" {
-		m := parsePairs(data.Pairs)
+		if len(data.Pairs) == 0 {
+			denv := os.Getenv("GHT_DATA")
+			if denv != "" {
+				parts, e := shlex.Split(denv)
+				checke(e)
+				data.Pairs, _ = grabWhilePairs(parts)
+			}
+		}
+		m := parsePairs(data.Pairs, data.Vars)
 		if len(m) > 0 {
 			payload, e := marshal(m, false)
 			checke(e)
@@ -140,11 +141,25 @@ func run(args []string) RunResponse {
 	if base != "" {
 		fullUrl = base + fullUrl
 	}
-	// is this a URI template?
-	if containsVarExpansions(fullUrl) {
-		var e error
-		fullUrl = expandVariables(fullUrl, data.Vars)
-		checke(e)
+	// path parameters, if defined...note that var expansion can take place as well
+	if len(data.Params) == 0 {
+		if ps := os.Getenv("GHT_PARAMS"); ps != "" {
+			parts, e := shlex.Split(ps)
+			checke(e)
+			data.Params, _ = grabWhilePairs(parts)
+		}
+	}
+	if len(data.Params) != 0 {
+		for _, a := range data.Params {
+			fullUrl += fmt.Sprintf("/%v", valueToInterface(a[1], data.Vars))
+		}
+	}
+
+	// question here is: can there be partial overloads from environment?
+	if query := os.Getenv("GHT_QUERY"); query != "" {
+		parts := strings.Split(query, " ")
+		pairs, _ := grabWhilePairs(parts)
+		data.Query = pairsToMapInterface(pairs, data.Vars)
 	}
 	if len(data.Query) > 0 {
 		q := parseQueryPairs(data.Query)
@@ -156,6 +171,7 @@ func run(args []string) RunResponse {
 	client := &http.Client{
 		//		Transport: transport,
 	}
+
 	var rdr io.Reader
 	if data.Payload != "" {
 		// the mineType has been already deduced, but let it be overridable
@@ -175,13 +191,10 @@ func run(args []string) RunResponse {
 	req, err := http.NewRequest(data.Method, fullUrl, rdr)
 	checke(err)
 
-	envVars := os.Environ()
 	for _, v := range envVars {
 		pair, ok := strings.CutPrefix(v, "GHT_HDR_")
 		if ok {
-			idx := strings.Index(pair, "=")
-			key, value := pair[:idx], pair[idx+1:]
-			data.Headers = append(data.Headers, []string{key, value})
+			data.Headers = append(data.Headers, strings.Split(pair, "="))
 		}
 	}
 	if data.Headers != nil {
@@ -238,7 +251,7 @@ func run(args []string) RunResponse {
 			path := filepath.Base(fullUrl)
 			path = strings.ReplaceAll(path, "?", "@")
 			path = strings.ReplaceAll(path, "&", "@")
-			err = ioutil.WriteFile(path, body, 0644)
+			err = os.WriteFile(path, body, 0644)
 			checke(err)
 			body = nil
 		} else if wasJson || (len(sbody) > 0 && sbody[0] == '{') {
@@ -287,7 +300,14 @@ func (data *RequestData) parse(args []string) bool {
 			} else if data.Method == "help" {
 				data.Help = true
 			} else {
-				quit("not a valid HTTP method " + data.Method)
+				e := readEnvFile(data.Method + ".env")
+				if e != nil {
+					quit("not a valid HTTP method or a local .env file " + data.Method)
+				}
+				data.Method = os.Getenv("GHT_METHOD")
+				if !isStandardMethod(data.Method) {
+					quit("GHT_METHOD not defined " + data.Method)
+				}
 			}
 		}
 		data.Method = strings.ToUpper(data.Method)
@@ -349,27 +369,20 @@ func (data *RequestData) parse(args []string) bool {
 				checke(e)
 				data.Vars = mappa
 			} else {
-				// this _overrides_ inherited map entries
-				if data.Vars == nil {
-					data.Vars = Map{}
-				}
-				newVars := parsePairs(pairs)
-				for k := range newVars {
-					data.Vars[k] = newVars[k]
-				}
+				data.Vars = parsePairs(pairs, nil)
 			}
 		case "q:", "query:":
 			pairs, args = grabWhilePairs(args)
 			checkHelp(len(pairs) == 0, args, "query")
-			pmap := pairsToMap(pairs)
-			data.Query = make(Map, len(pmap))
-			for k, v := range pmap {
-				data.Query[k] = v
-			}
+			data.Query = pairsToMapInterface(pairs, nil)
 		case "h:", "head:":
 			pairs, args = grabWhilePairs(args)
 			checkHelp(len(pairs) == 0, args, "head")
 			data.Headers = pairs
+		case "p:", "parms:":
+			pairs, args = grabWhilePairs(args)
+			checkHelp(len(pairs) == 0, args, "parms")
+			data.Params = pairs
 		case "o:", "out:":
 			var e error
 			checkHelp(len(args) == 0, args, "out")

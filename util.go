@@ -5,7 +5,6 @@ import (
 	"github.com/stevedonovan/ght/pointer"
 	"github.com/stevedonovan/ght/term"
 	"log"
-	"net/url"
 	"os"
 	"regexp"
 	"strconv"
@@ -25,6 +24,14 @@ func pairsToMap(pairs [][]string) map[string]string {
 	m := make(map[string]string)
 	for _, p := range pairs {
 		m[p[0]] = p[1]
+	}
+	return m
+}
+
+func pairsToMapInterface(pairs [][]string, vars Map) Map {
+	m := make(Map)
+	for _, p := range pairs {
+		m[p[0]] = valueToInterface(p[1], vars)
 	}
 	return m
 }
@@ -76,10 +83,10 @@ func grabWhilePairs(args []string) (Pairs, []string) {
 }
 
 // useful stuff for turning Pairs like a=1 name=hello into JSON
-func parsePairs(args [][]string) Map {
+func parsePairs(args [][]string, vars Map) Map {
 	m := make(Map)
 	for _, a := range args {
-		setKey(m, a[0], valueToInterface(a[1]))
+		setKey(m, a[0], valueToInterface(a[1], vars))
 	}
 	return m
 }
@@ -102,28 +109,47 @@ func setKey(m Map, key string, value interface{}) {
 	}
 }
 
-func valueToInterface(value string) interface{} {
-	if strings.HasPrefix(value, "[") && strings.HasSuffix(value, "]") {
-		value = value[1 : len(value)-1]
-		parts := strings.Split(value, ",")
+func pruneEnds(value string, start, end string) (string, bool) {
+	if strings.HasPrefix(value, start) && strings.HasSuffix(value, end) {
+		return value[1 : len(value)-1], true
+	} else {
+		return value, false
+	}
+}
+
+func valueToInterface(value string, vars Map) interface{} {
+	// arrays are simple expressions like [1,2] or [hello,barbie,doll]
+	if avalue, ok := pruneEnds(value, "[", "]"); ok {
+		parts := strings.Split(avalue, ",")
 		arr := make(Array, len(parts))
 		for i, p := range parts {
-			arr[i] = valueToInterface(p)
+			arr[i] = valueToInterface(p, vars)
 		}
 		return arr
+	}
+	if lvalue, ok := pruneEnds(value, "{", "}"); ok && vars != nil {
+		r, e := pointer.Filter(vars, lvalue, nil)
+		if e != nil {
+			log.Printf("cannot lookup %q: %v", lvalue, e)
+			return value
+		} else {
+			return r
+		}
 	}
 	if value == "true" || value == "false" {
 		return value == "true"
 	}
+	// we can read @-files at the key-value level; @@ escapes initial @
 	if strings.HasPrefix(value, "@") {
 		value = value[1:]
 		if strings.HasPrefix(value, "@") { // then just escape @
 			return value
 		}
-		b, e := loadFileIfPossible(value, true)
-		if e != "application/json" {
+		b, mtype := loadFileIfPossible(value, true)
+		if mtype != "application/json" {
 			return b
 		} else {
+			// we *could* convert to JSON, so slice the resulting object in...
 			var res interface{}
 			checke(unmarshal(b, &res))
 			return res
@@ -159,7 +185,7 @@ func readKeyValueFile(contents string) (Map, error) {
 	if err != nil {
 		return res, err
 	}
-	res = parsePairs(pairs)
+	res = parsePairs(pairs, nil)
 	return res, nil
 }
 
@@ -168,46 +194,13 @@ func containsVarExpansions(s string) bool {
 }
 
 var (
-	//regularVar = regexp.MustCompile(`[a-z][\w_-]*`)
-	varExpansion = regexp.MustCompile(`{[/?]*[a-zA-Z][\w_\-,.]*}`)
+	// identifiers, but also with hyphens and periods (for indexing)
+	varExpansion = regexp.MustCompile(`{[a-zA-Z][\w_\-.]*}`)
 )
-
-type Pair struct {
-	name  string
-	value string
-}
 
 func expandVariables(value string, vars Map) string {
 	return varExpansion.ReplaceAllStringFunc(value, func(s string) string {
-		s = s[1 : len(s)-1] // trim the {}
-		if s[0] == '/' || s[0] == '?' {
-			op := s[0]
-			s = s[1:]
-			pairs := []Pair{}
-			for _, p := range strings.Split(s, ",") {
-				r := lookup(p, vars, false)
-				if r != "" {
-					pairs = append(pairs, Pair{p, r})
-				}
-			}
-			subst := strings.Builder{}
-			if op == '/' {
-				for _, p := range pairs {
-					value := url.PathEscape(p.value)
-					subst.WriteString("/" + value)
-				}
-			} else {
-				sep := "?"
-				for _, p := range pairs {
-					value := url.QueryEscape(p.value)
-					subst.WriteString(sep + p.name + "=" + value)
-					sep = "&"
-				}
-			}
-			return subst.String()
-		} else {
-			return lookup(s, vars, true)
-		}
+		return lookup(s, vars, true)
 	})
 }
 
@@ -229,4 +222,22 @@ func lookup(s string, vars Map, full bool) string {
 		log.Printf("%q is not defined", s)
 		return ""
 	}
+}
+
+func readEnvFile(f string) error {
+	bb, err := os.ReadFile(f)
+	if err != nil {
+		return err
+	}
+	//fmt.Println("len", len(bb))
+	pairs, err := readKeyValuePairs(string(bb))
+	if err != nil {
+		return err
+	}
+	//fmt.Println("pairs", len(pairs))
+	for _, pair := range pairs {
+		//log.Printf("Setting %s to %q", pair[0], pair[1])
+		os.Setenv(pair[0], pair[1])
+	}
+	return nil
 }
