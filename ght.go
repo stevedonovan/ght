@@ -29,7 +29,7 @@ type RequestData struct {
 	Base         string       `json:"base,omitempty"`
 	Url          string       `json:"url,omitempty"`
 	Vars         Map          `json:"vars,omitempty"`
-	Query        Map          `json:"query,omitempty"`
+	QueryPairs   Pairs        `json:"query_pairs,omitempty"`
 	Headers      [][]string   `json:"headers,omitempty"`
 	User         string       `json:"user,omitempty"`
 	Password     string       `json:"password,omitempty"`
@@ -97,6 +97,19 @@ type RunResponse struct {
 	data          Map
 }
 
+func grabEnvVarPairs(envVar string) Pairs {
+	if ps := os.Getenv(envVar); ps != "" {
+		parts, e := shlex.Split(ps)
+		checke(e)
+		pairs, rest := grabWhilePairs(parts)
+		if len(rest) > 0 {
+			quit(envVar + " must only consist of var=value pairs")
+		}
+		return pairs
+	}
+	return Pairs{}
+}
+
 func run(args []string) RunResponse {
 	var data RequestData
 
@@ -109,17 +122,31 @@ func run(args []string) RunResponse {
 
 	envVars := os.Environ()
 
-	if os.Getenv("DUMP_GHT_DATA") != "" {
-		fmt.Printf("we got %#v\n", data)
+	if os.Getenv("GHT_DUMP_DATA") != "" {
+		out, _ := marshal(data, false)
+		fmt.Printf("data: %s\n", out)
+		os.Exit(0)
 	}
-	// so data may come in as key-value Pairs
+
+	// output format from the environment
+	if of := os.Getenv("GHT_OUT"); of != "" && !data.OutputFormat.Init {
+		parts, e := shlex.Split(of)
+		checke(e)
+		_, e = data.OutputFormat.parse(parts, data.Vars)
+		checke(e)
+	}
+	// request data may come from the environment
 	if data.Payload == "" {
 		if len(data.Pairs) == 0 {
 			denv := os.Getenv("GHT_DATA")
 			if denv != "" {
+				// same key-value format OR @file as in data:
 				parts, e := shlex.Split(denv)
 				checke(e)
-				data.Pairs, _ = grabWhilePairs(parts)
+				data.Pairs, parts = grabWhilePairs(parts)
+				if len(parts) > 0 {
+					data.processDataFileOrText(parts[0], true)
+				}
 			}
 		}
 		m := parsePairs(data.Pairs, data.Vars)
@@ -135,34 +162,34 @@ func run(args []string) RunResponse {
 	}
 	fullUrl := data.Url
 	base := data.Base
+	logf("url %q base %q", data.Url, data.Base)
 	if base == "" && strings.HasPrefix(fullUrl, "/") {
-		base = os.Getenv("GHT_URL")
+		base = os.Getenv("GHT_HOST")
+	}
+	if port := os.Getenv("GHT_PORT"); port != "" {
+		base += ":" + port
 	}
 	if base != "" {
 		fullUrl = base + fullUrl
 	}
+
 	// path parameters, if defined...note that var expansion can take place as well
 	if len(data.Params) == 0 {
-		if ps := os.Getenv("GHT_PARAMS"); ps != "" {
-			parts, e := shlex.Split(ps)
-			checke(e)
-			data.Params, _ = grabWhilePairs(parts)
-		}
+		data.Params = grabEnvVarPairs("GHT_PARAMS")
 	}
 	if len(data.Params) != 0 {
 		for _, a := range data.Params {
 			fullUrl += fmt.Sprintf("/%v", valueToInterface(a[1], data.Vars))
 		}
 	}
-
+	// query parameters
 	// question here is: can there be partial overloads from environment?
-	if query := os.Getenv("GHT_QUERY"); query != "" {
-		parts := strings.Split(query, " ")
-		pairs, _ := grabWhilePairs(parts)
-		data.Query = pairsToMapInterface(pairs, data.Vars)
+	if len(data.QueryPairs) == 0 {
+		data.QueryPairs = grabEnvVarPairs("GHT_QUERY")
 	}
-	if len(data.Query) > 0 {
-		q := parseQueryPairs(data.Query)
+	if len(data.QueryPairs) > 0 {
+		qmap := pairsToMapInterface(data.QueryPairs, data.Vars)
+		q := parseQueryPairs(qmap)
 		query := q.Encode()
 		if query != "" {
 			fullUrl += "?" + query
@@ -174,7 +201,7 @@ func run(args []string) RunResponse {
 
 	var rdr io.Reader
 	if data.Payload != "" {
-		// the mineType has been already deduced, but let it be overridable
+		// specify the content type, if not already set
 		doAppend := false
 		for _, pair := range data.Headers {
 			if strings.EqualFold("Content-Type", pair[0]) {
@@ -191,6 +218,7 @@ func run(args []string) RunResponse {
 	req, err := http.NewRequest(data.Method, fullUrl, rdr)
 	checke(err)
 
+	// headers
 	for _, v := range envVars {
 		pair, ok := strings.CutPrefix(v, "GHT_HDR_")
 		if ok {
@@ -200,9 +228,21 @@ func run(args []string) RunResponse {
 	if data.Headers != nil {
 		req.Header = parseHeaders(data.Headers, data.Vars)
 	}
+
+	// basic auth
+	if data.User == "" {
+		if pair := os.Getenv("GHT_USER"); pair != "" {
+			var ok bool
+			data.User, data.Password, ok = split2(pair, "=")
+			if !ok {
+				quit("GHT_USER value must be of form user=password")
+			}
+		}
+	}
 	if data.User != "" {
 		req.SetBasicAuth(data.User, data.Password)
 	}
+
 	if data.Req {
 		bb, err2 := httputil.DumpRequest(req, true)
 		if err2 != nil {
@@ -211,6 +251,7 @@ func run(args []string) RunResponse {
 		fmt.Println(string(bb))
 		os.Exit(0)
 	}
+
 	var body []byte
 	var resp *http.Response
 	var status string
@@ -313,34 +354,70 @@ func (data *RequestData) parse(args []string) bool {
 		data.Method = strings.ToUpper(data.Method)
 		args = args[1:]
 	}
-	fetch := data.Method != "TEST"
+	if len(args) == 0 {
+		quit("provide arguments")
+	}
+	if !data.getShortcut {
+		var nargs []string
+		Append := func(key string) {
+			nargs = append(nargs, key+"="+args[0])
+			args = args[1:]
+		}
+		if arg1 := os.Getenv("GHT_ARG_1"); arg1 != "" {
+			Append(arg1)
+			if arg2 := os.Getenv("GHT_ARG_2"); arg2 != "" {
+				Append(arg2)
+				if arg3 := os.Getenv("GHT_ARG_3"); arg3 != "" {
+					Append(arg3)
+				}
+			}
+		}
+		if len(nargs) > 0 {
+			args = append(nargs, args...)
+			fmt.Println("new args", args)
+		}
+	}
+	var implicitVars bool
+	if len(args) > 0 && strings.Contains(args[0], "=") {
+		implicitVars = true
+	}
 	for len(args) > 0 {
-		flag, args = args[0], args[1:]
+		if !implicitVars {
+			flag, args = args[0], args[1:]
+		} else {
+			implicitVars = false
+			flag = "vars:"
+		}
 		switch flag {
+		case "v:", "vars:":
+			pairs, args = grabWhilePairs(args)
+			// var data can either be a file convertible to JSON (like YAML or JSON5) or key-value pairs
+			checkHelp(len(pairs) == 0, args, "vars")
+			if len(pairs) == 0 {
+				contents, mtype := loadFileIfPossible(args[0], true)
+				if mtype != "application/json" {
+					quit("vars can only be set with JSON or YAML currently")
+				}
+				args = args[1:]
+				mappa := make(Map)
+				checke(unmarshal(contents, &mappa))
+				data.Vars = mappa
+			} else {
+				data.Vars = parsePairs(pairs, nil)
+			}
 		case "d:", "data:":
 			data.Pairs, args = grabWhilePairs(args)
 			checkHelp(len(pairs) == 0, args, "data")
 			if len(data.Pairs) == 0 {
 				first := args[0]
 				args = args[1:]
-				if file, ok := strings.CutPrefix(first, "@"); ok || first == "-" {
-					if first == "-" {
-						file = "IN"
-					}
-					// as a file, always interpreted as JSON data (use body: otherwise)
-					data.Payload, data.mimeType = loadFileIfPossible(file, true)
-				} else {
-					data.Payload, data.mimeType = file, "text/plain"
-				}
+				data.processDataFileOrText(first, true)
 			}
 		case "b:", "body:":
 			var fname string
 			checkHelp(len(args) == 0, args, "body")
 			fname, args = args[0], args[1:]
-			if fname == "-" {
-				fname = "IN"
-			}
-			data.Payload, data.mimeType = loadFileIfPossible(fname, false)
+			data.processDataFileOrText(fname, false)
 		case "req:", "request:":
 			if len(args) > 1 {
 				args = args[1:]
@@ -355,38 +432,22 @@ func (data *RequestData) parse(args []string) bool {
 			pairs, args = grabWhilePairs(args)
 			checkHelp(len(pairs) == 0, args, "flags")
 			data.Flags = pairsToMap(pairs)
-		case "v:", "vars:":
-			pairs, args = grabWhilePairs(args)
-			checkHelp(len(pairs) == 0, args, "vars")
-			if len(pairs) == 0 {
-				contents, mtype := loadFileIfPossible(args[0], false)
-				if mtype != "application/json" {
-					quit("vars can only be set with JSON currently")
-				}
-				args = args[1:]
-				mappa := make(Map)
-				e := unmarshal(contents, &mappa)
-				checke(e)
-				data.Vars = mappa
-			} else {
-				data.Vars = parsePairs(pairs, nil)
-			}
 		case "q:", "query:":
 			pairs, args = grabWhilePairs(args)
 			checkHelp(len(pairs) == 0, args, "query")
-			data.Query = pairsToMapInterface(pairs, nil)
+			data.QueryPairs = pairs
 		case "h:", "head:":
 			pairs, args = grabWhilePairs(args)
 			checkHelp(len(pairs) == 0, args, "head")
 			data.Headers = pairs
-		case "p:", "parms:":
+		case "p:", "params:":
 			pairs, args = grabWhilePairs(args)
-			checkHelp(len(pairs) == 0, args, "parms")
+			checkHelp(len(pairs) == 0, args, "params")
 			data.Params = pairs
 		case "o:", "out:":
 			var e error
 			checkHelp(len(args) == 0, args, "out")
-			args, e = data.OutputFormat.parse(args)
+			args, e = data.OutputFormat.parse(args, data.Vars)
 			data.OutputFormat.Last = wasLast
 			checke(e)
 		case "user:":
@@ -398,8 +459,8 @@ func (data *RequestData) parse(args []string) bool {
 			if len(parts) > 1 {
 				data.Password = parts[1]
 			}
-		case "u:", "url:":
-			checkHelp(len(args) == 0, args, "url")
+		case "host:":
+			checkHelp(len(args) == 0, args, "host")
 			data.Base, args = args[0], args[1:]
 		default:
 			if flag == "" {
@@ -410,7 +471,22 @@ func (data *RequestData) parse(args []string) bool {
 			}
 		}
 	}
-	return fetch
+	if data.Url == "" {
+		data.Url = os.Getenv("GHT_PATH")
+	}
+	return true
+}
+
+func (data *RequestData) processDataFileOrText(first string, forceJson bool) {
+	if file, ok := strings.CutPrefix(first, "@"); ok || first == "-" {
+		if first == "-" {
+			file = "IN"
+		}
+		// as a file, always interpreted as JSON data (use body: otherwise)
+		data.Payload, data.mimeType = loadFileIfPossible(file, forceJson)
+	} else {
+		data.Payload, data.mimeType = file, "text/plain"
+	}
 }
 
 func isUrl(s string) bool {

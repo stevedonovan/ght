@@ -139,6 +139,7 @@ func marshalCSV(data interface{}, delim rune, keys []string) (string, error) {
 }
 
 type OutputFormat struct {
+	Init     bool   `json:"init,omitempty"`
 	JPointer string `json:"j_pointer,omitempty"`
 	OType    string `json:"o_type,omitempty"`
 	File     string `json:"file,omitempty"`
@@ -252,25 +253,26 @@ func (of *OutputFormat) empty() bool {
 	return of.JPointer == "" && of.OType == "" && of.File == ""
 }
 
-func lookupAlt(key1, key2 string, m map[string]string) string {
+func lookupAlt(key1, key2 string, m Map) string {
 	val, ok := m[key1]
 	if ok {
 		delete(m, key1)
-		return val
+		return val.(string)
 	}
 	val, ok = m[key2]
 	if ok {
 		delete(m, key2)
-		return val
+		return val.(string)
 	}
 	return ""
 }
 
-func (ofp *OutputFormat) parse(args []string) ([]string, error) {
+func (ofp *OutputFormat) parse(args []string, vars Map) ([]string, error) {
+	ofp.Init = true
 	var pairs [][]string
 	pairs, args = grabWhilePairs(args)
 	if len(pairs) > 0 {
-		m := pairsToMap(pairs)
+		m := pairsToMapInterface(pairs, vars)
 		ofp.JPointer = lookupAlt("F", "field", m)
 		ofp.OType = lookupAlt("t", "type", m)
 		ofp.File = lookupAlt("f", "file", m)

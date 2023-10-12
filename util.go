@@ -11,8 +11,16 @@ import (
 	"strings"
 )
 
-func splitDot2(s string) (string, string, bool) {
-	parts := strings.SplitN(s, ".", 2)
+var ghtDebug = os.Getenv("GHT_DEBUG") == "1"
+
+func logf(fmt string, args ...any) {
+	if ghtDebug {
+		log.Printf(fmt, args...)
+	}
+}
+
+func split2(s, sep string) (string, string, bool) {
+	parts := strings.SplitN(s, sep, 2)
 	if len(parts) > 1 {
 		return parts[0], parts[1], true
 	} else {
@@ -51,7 +59,7 @@ func checke(e error) {
 	}
 }
 
-func keys(m map[string]string) []string {
+func keys(m Map) []string {
 	res := make([]string, len(m))
 	i := 0
 	for k := range m {
@@ -92,7 +100,7 @@ func parsePairs(args [][]string, vars Map) Map {
 }
 
 func setKey(m Map, key string, value interface{}) {
-	subkey, rest, ok := splitDot2(key)
+	subkey, rest, ok := split2(key, ".")
 	if ok {
 		subm, ok := m[subkey]
 		if !ok {
@@ -229,14 +237,12 @@ func readEnvFile(f string) error {
 	if err != nil {
 		return err
 	}
-	//fmt.Println("len", len(bb))
 	pairs, err := readKeyValuePairs(string(bb))
 	if err != nil {
 		return err
 	}
-	//fmt.Println("pairs", len(pairs))
 	for _, pair := range pairs {
-		//log.Printf("Setting %s to %q", pair[0], pair[1])
+		logf("Setting %s to %q", pair[0], pair[1])
 		os.Setenv(pair[0], pair[1])
 	}
 	return nil
